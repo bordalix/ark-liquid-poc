@@ -4,7 +4,11 @@ import { Extractor, Finalizer, networks, Pset } from 'liquidjs-lib';
 import * as ecc from 'tiny-secp256k1';
 
 import { broadcast, TestWallet } from './_regtest.spec';
-import { createPoolTransaction, hashForfeitMessage } from './ark';
+import {
+  createPoolTransaction,
+  hashForfeitMessage,
+  makeRedeemTransaction,
+} from './ark';
 import { ForfeitMessage, OnboardOrder, TransferOrder } from './core';
 
 const ECPair = ECPairFactory(ecc);
@@ -19,6 +23,7 @@ const serviceProvider = ECPair.makeRandom();
 const serviceProviderWallet = new TestWallet(serviceProvider);
 
 const bob = ECPair.makeRandom();
+const bobWallet = new TestWallet(bob);
 
 test('it should let Alice to create vUtxo, and send it to Bob', async (t) => {
   const { coins, change } = await aliceWallet.coinSelect(ONE_LBTC, LBTC);
@@ -115,6 +120,25 @@ test('it should let Alice to create vUtxo, and send it to Bob', async (t) => {
   console.log('pool txID 1:', nextTxID);
   console.log('pool tx 0 (hex):', nextPoolTransaction.toHex());
 
-  // once the nextTx is in the mempool, Bob owns the vUtxo and can repeat the process.
+  // once the nextTx is in the mempool, Bob owns the vUtxo and can redeem it.
+
+  const vUtxoBob = nextPoolTx.vUtxos.get(bob.publicKey.toString('hex'));
+  t.not(vUtxoBob, undefined, 'Bob should have vUtxos');
+
+  const bobRedeemPset = makeRedeemTransaction(
+    vUtxoBob.vUtxo,
+    vUtxoBob.vUtxoTree.redeemLeaf
+  );
+
+  const bobRedeemPsetSigned = bobWallet.sign(bobRedeemPset);
+
+  new Finalizer(bobRedeemPsetSigned).finalize();
+
+  const bobRedeemTx = Extractor.extract(bobRedeemPsetSigned);
+
+  const bobRedeemTxID = await broadcast(bobRedeemTx.toHex());
+  console.log('redeem txID 1:', bobRedeemTxID);
+  console.log('redeem tx 0 (hex):', bobRedeemTx.toHex());
+
   t.pass();
 });
